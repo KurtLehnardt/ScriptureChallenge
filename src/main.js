@@ -1,103 +1,395 @@
-const firebaseConfig = {
-  apiKey: process.env.FB_API_KEY,
-  authDomain: process.env.AUTH_DOMAIN,
-  databaseURL: process.env.DB_URL,
-  projectId: "popcorn-reservation",
-  storageBucket: "popcorn-reservation.appspot.com",
-  messagingSenderId: process.env.MSG_SENDER_ID,
-  appId: process.env.APP_ID,
-  measurementId: process.env.MEASUREMENT_ID
-}
-firebase.initializeApp(firebaseConfig)
-const messagesRef = firebase.database().ref('registrations')
+import React, { useState, useEffect, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import {
+    getAuth,
+    signInAnonymously,
+    signInWithCustomToken,
+    onAuthStateChanged,
+    GoogleAuthProvider,
+    FacebookAuthProvider,
+    signInWithPopup,
+    signOut
+} from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from 'firebase/firestore';
 
-const form = document.querySelector('#contactForm')
-const alertMsg = document.querySelector('#alertMessage')
+// Mock Scripture Data
+// In a real application, this would likely come from an API or a larger data source.
+// This example focuses on the structure and interaction.
+const MOCK_SCRIPTURES = {
+    "Matthew": {
+        "Chapter 5": {
+            "Verse 1": "Blessed are the poor in spirit: for theirs is the kingdom of heaven.",
+            "Verse 2": "Blessed are they that mourn: for they shall be comforted."
+        },
+        "Chapter 6": {
+            "Verse 1": "Take heed that ye do not your alms before men, to be seen of them: otherwise ye have no reward of your Father which is in heaven.",
+            "Verse 2": "Therefore when thou doest thine alms, do not sound a trumpet before thee, as the hypocrites do in the synagogues and in the streets, that they may have glory of men. Verily I say unto you, They have their reward."
+        }
+    },
+    "Mark": {
+        "Chapter 1": {
+            "Verse 1": "The beginning of the gospel of Jesus Christ, the Son of God;",
+            "Verse 2": "As it is written in the prophets, Behold, I send my messenger before thy face, which shall prepare thy way before thee."
+        }
+    },
+    "Luke": {
+        "Chapter 10": {
+            "Verse 1": "After these things the Lord appointed other seventy also, and sent them two and two before his face into every city and place, whither he himself would come.",
+            "Verse 2": "Therefore said he unto them, the harvest truly is great, but the labourers are few: pray ye therefore the Lord of the harvest, that he would send forth labourers into his harvest."
+        }
+    }
+};
 
-let dbKeysArray = []
-let previouslyRegisteredArr = []
-let haveCheckedForPriorRegistrations = false
-let userAlreadyExists = false
+const App = () => {
+    const [db, setDb] = useState(null);
+    const [auth, setAuth] = useState(null);
+    const [userId, setUserId] = useState(null);
+    const [readScriptures, setReadScriptures] = useState({}); // { 'Matthew_5_Verse 1': true, ... }
+    const [loading, setLoading] = useState(true);
+    const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+    const [message, setMessage] = useState('');
 
-// adds all prior usernames and emails to an array to prohibit registration conflicts
-const populateListOfPreviousRegistrations = () => {
-  if (!haveCheckedForPriorRegistrations){
-  haveCheckedForPriorRegistrations = true
-  messagesRef.on('value', snapshot => {
-    for (key in snapshot.val()){
-        dbKeysArray.push(key)
-      }
-    for (let i = 0; i < dbKeysArray.length; i++){
-        previouslyRegisteredArr.push(snapshot.val()[dbKeysArray[i]].email, snapshot.val()[dbKeysArray[i]].username)
-      }
-    })
-  }
-}
-// const can't be used as an IFFE? must be named with 'function'
-populateListOfPreviousRegistrations()
+    // Firebase initialization and authentication
+    useEffect(() => {
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
 
-const submitForm = e => {
-  e.preventDefault()
+        try {
+            const app = initializeApp(firebaseConfig);
+            const firestoreDb = getFirestore(app);
+            const firebaseAuth = getAuth(app);
 
-  const name = getInputVal('name').trim()
-  const username = getInputVal('username').trim()
-  const email = getInputVal('email').trim()
+            setDb(firestoreDb);
+            setAuth(firebaseAuth);
 
-  if (!checkForPriorRegistrations(username, email)) {
-    updateAlertMessage('success')
-    showAndHideAlertMessage()
-    saveMessageToDB(name, username, email)
-  } else {
-    userAlreadyExists = false
-  }
-}
+            // Set up auth state listener
+            const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    setMessage(`Logged in as User ID: ${user.uid}`); // Display full UID
+                    setShowLoginPrompt(false); // Close prompt on successful login
+                } else {
+                    setUserId(null);
+                    setMessage('Not logged in. Please sign in to save progress.');
+                    // If not logged in, attempt anonymous sign-in or show prompt
+                    const initialAuth = async () => {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                await signInWithCustomToken(firebaseAuth, __initial_auth_token);
+                            } else {
+                                // Only sign in anonymously if no other auth method is active
+                                if (!firebaseAuth.currentUser) {
+                                    await signInAnonymously(firebaseAuth);
+                                }
+                            }
+                        } catch (error) {
+                            console.error("Firebase Auth Error (initial):", error);
+                            setMessage(`Authentication error: ${error.message}`);
+                        } finally {
+                            setLoading(false);
+                        }
+                    };
+                    initialAuth();
+                }
+                // Ensure loading is false after initial auth state check
+                if (firebaseAuth.currentUser === null && !loading) {
+                    setLoading(false);
+                }
+            });
 
-const getInputVal = id => document.getElementById(id).value
+            return () => unsubscribe(); // Cleanup auth listener
+        } catch (error) {
+            console.error("Firebase Initialization Error:", error);
+            setMessage(`Initialization error: ${error.message}`);
+            setLoading(false);
+        }
+    }, []); // Empty dependency array means this runs once on mount
 
-const checkForPriorRegistrations = (username, email) => {
-  if (checkIfValueExists(previouslyRegisteredArr, username)) {
-    updateAlertMessage(username)
-  }
-  if (checkIfValueExists(previouslyRegisteredArr, email)) {
-  }
-  return userAlreadyExists
-}
+    // Fetch read scriptures from Firestore
+    useEffect(() => {
+        if (!db || !userId) return;
 
-const checkIfValueExists = (arr, value) => arr.includes(value)
+        // Construct the Firestore path using the userId
+        const userProgressDocRef = doc(db, `artifacts/${__app_id}/users/${userId}/scriptureProgress`, 'readStatus');
 
-const updateAlertMessage = value => {
-  if (value === 'success'){
-    alertMsg.className = 'reservationCompleted'
-    alertMsg.innerHTML = 'Your reservation request has been sent'
-    return
-  }
-  alertMsg.className = 'usernameAlreadyInUse'
-  alertMsg.innerHTML = `${value} is already in use.`
-  showAndHideAlertMessage()
-  userAlreadyExists = true
-}
+        const unsubscribe = onSnapshot(userProgressDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setReadScriptures(docSnap.data().progress || {});
+            } else {
+                setReadScriptures({}); // No progress yet for this user
+            }
+        }, (error) => {
+            console.error("Error fetching read scriptures:", error);
+            setMessage(`Error fetching progress: ${error.message}`);
+        });
 
-const showAndHideAlertMessage = () => {
-    showAlertMessage()
-    setTimeout(hideAlertMessage, 3000)
-}
+        return () => unsubscribe(); // Cleanup snapshot listener
+    }, [db, userId]); // Re-run when db or userId changes
 
-const showAlertMessage = () => alertMsg.style.display = 'block'
-const hideAlertMessage = () => alertMsg.style.display = 'none'
+    // Function to mark a scripture as read/unread
+    const toggleReadStatus = useCallback(async (book, chapter, verse) => {
+        if (!db || !userId) {
+            setMessage("Please sign in to save your progress.");
+            setShowLoginPrompt(true); // Show login prompt if not authenticated
+            return;
+        }
 
+        const scriptureKey = `${book}_${chapter}_${verse}`;
+        const newReadStatus = { ...readScriptures };
 
-const saveMessageToDB = (name, username, email) => {
-  const newMessageRef = messagesRef.push()
-  newMessageRef.set({
-    name: name,
-    username: username,
-    email :email
-  })
-  setTimeout(exitAnimation, 1500)
-}
+        if (newReadStatus[scriptureKey]) {
+            delete newReadStatus[scriptureKey]; // Mark as unread by removing from map
+        } else {
+            newReadStatus[scriptureKey] = true; // Mark as read
+        }
 
-const exitAnimation = () => {
-  const wrapper = document.querySelector('.wrapper')
-  wrapper.classList.remove('pulse')
-  wrapper.classList.add('zoomOutRight')
-}
+        const userProgressDocRef = doc(db, `artifacts/${__app_id}/users/${userId}/scriptureProgress`, 'readStatus');
+
+        try {
+            // Use setDoc with merge:true to update or create the document without overwriting other fields
+            await setDoc(userProgressDocRef, { progress: newReadStatus }, { merge: true });
+            // setMessage(`Progress saved for ${book} ${chapter} ${verse}.`); // Removed for less clutter
+        } catch (e) {
+            console.error("Error writing document: ", e);
+            setMessage(`Error saving progress: ${e.message}`);
+        }
+    }, [db, userId, readScriptures]); // Dependencies for useCallback
+
+    // Calculate total scriptures and read scriptures
+    const totalScriptures = Object.values(MOCK_SCRIPTURES).reduce((bookAcc, book) => {
+        return bookAcc + Object.values(book).reduce((chapterAcc, chapter) => {
+            return chapterAcc + Object.keys(chapter).length;
+        }, 0);
+    }, 0);
+
+    const numReadScriptures = Object.keys(readScriptures).length;
+    const progressPercentage = totalScriptures > 0 ? ((numReadScriptures / totalScriptures) * 100).toFixed(2) : 0;
+
+    // Handlers for social logins
+    const handleGoogleSignIn = async () => {
+        if (!auth) return;
+        const provider = new GoogleAuthProvider();
+        try {
+            await signInWithPopup(auth, provider);
+            setShowLoginPrompt(false); // Close modal on success
+            setMessage("Signed in with Google successfully!");
+        } catch (error) {
+            console.error("Google Sign-in Error:", error);
+            setMessage(`Google Sign-in failed: ${error.message}`);
+        }
+    };
+
+    const handleFacebookSignIn = async () => {
+        if (!auth) return;
+        const provider = new FacebookAuthProvider();
+        try {
+            await signInWithPopup(auth, provider);
+            setShowLoginPrompt(false); // Close modal on success
+            setMessage("Signed in with Facebook successfully!");
+        } catch (error) {
+            console.error("Facebook Sign-in Error:", error);
+            setMessage(`Facebook Sign-in failed: ${error.message}`);
+        }
+    };
+
+    const handleSignOut = async () => {
+        if (!auth) return;
+        try {
+            await signOut(auth);
+            setReadScriptures({}); // Clear local progress on sign out
+            setMessage("Signed out successfully.");
+        } catch (error) {
+            console.error("Sign-out Error:", error);
+            setMessage(`Sign-out failed: ${error.message}`);
+        }
+    };
+
+    // Show loading state
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+                <div className="text-2xl font-semibold">Loading Application...</div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 font-inter text-gray-800 dark:bg-gradient-to-br dark:from-gray-900 dark:to-gray-800 dark:text-gray-200">
+            <script src="https://cdn.tailwindcss.com"></script>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+
+            <style>
+                {`
+                .font-inter {
+                    font-family: 'Inter', sans-serif;
+                }
+                .scroll-container {
+                    max-height: calc(100vh - 200px); /* Adjust based on header/footer height */
+                    overflow-y: auto;
+                    scrollbar-width: thin;
+                    scrollbar-color: #9ca3af #f3f4f6; /* thumb and track color */
+                }
+                .scroll-container::-webkit-scrollbar {
+                    width: 8px;
+                }
+                .scroll-container::-webkit-scrollbar-track {
+                    background: #f3f4f6; /* light gray */
+                    border-radius: 10px;
+                }
+                .scroll-container::-webkit-scrollbar-thumb {
+                    background-color: #9ca3af; /* medium gray */
+                    border-radius: 10px;
+                    border: 2px solid #f3f4f6;
+                }
+                @media (prefers-color-scheme: dark) {
+                    .scroll-container::-webkit-scrollbar-track {
+                        background: #1f2937; /* dark gray */
+                    }
+                    .scroll-container::-webkit-scrollbar-thumb {
+                        background-color: #4b5563; /* medium dark gray */
+                        border: 2px solid #1f2937;
+                    }
+                }
+                `}
+            </style>
+
+            <div className="max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 md:p-8">
+                <h1 className="text-4xl font-bold text-center mb-6 text-indigo-700 dark:text-blue-400">
+                    Jesus' Sayings Reader
+                </h1>
+
+                <div className="flex justify-between items-center mb-6 p-4 bg-indigo-50 dark:bg-gray-700 rounded-lg shadow-inner">
+                    <div className="text-lg font-semibold flex items-center">
+                        <span className="mr-2 text-indigo-600 dark:text-blue-300">User ID:</span>
+                        {userId ? (
+                            <span className="font-mono text-sm px-2 py-1 bg-indigo-100 dark:bg-gray-600 rounded-md">
+                                {userId}
+                            </span>
+                        ) : (
+                            <span className="text-red-500">Not assigned</span>
+                        )}
+                    </div>
+                    <div className="text-lg font-semibold flex items-center">
+                        <span className="mr-2 text-indigo-600 dark:text-blue-300">Progress:</span>
+                        <span className="text-green-600 dark:text-green-400">
+                            {numReadScriptures} / {totalScriptures} ({progressPercentage}%)
+                        </span>
+                    </div>
+                    <div className="flex space-x-2">
+                        {!userId ? (
+                            <button
+                                onClick={() => setShowLoginPrompt(true)}
+                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200 shadow-md"
+                            >
+                                Sign In
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleSignOut}
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 shadow-md"
+                            >
+                                Sign Out
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {message && (
+                    <div className="mb-4 p-3 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded-lg text-center">
+                        {message}
+                    </div>
+                )}
+
+                <div className="scroll-container space-y-8 p-4 bg-gray-50 dark:bg-gray-750 rounded-xl shadow-inner">
+                    {Object.entries(MOCK_SCRIPTURES).map(([bookName, bookData]) => (
+                        <div key={bookName} className="border-b border-indigo-200 dark:border-gray-600 pb-4 last:border-b-0">
+                            <h2 className="text-3xl font-semibold text-indigo-600 dark:text-blue-300 mb-4 px-2 py-1 rounded-md bg-indigo-100 dark:bg-gray-700">
+                                {bookName}
+                            </h2>
+                            {Object.entries(bookData).map(([chapterName, chapterData]) => (
+                                <div key={`${bookName}-${chapterName}`} className="mb-6 ml-4">
+                                    <h3 className="text-xl font-medium text-indigo-500 dark:text-blue-200 mb-3">
+                                        {chapterName}
+                                    </h3>
+                                    <ul className="space-y-3">
+                                        {Object.entries(chapterData).map(([verseName, quote]) => {
+                                            const scriptureKey = `${bookName}_${chapterName}_${verseName}`;
+                                            const isRead = readScriptures[scriptureKey];
+                                            return (
+                                                <li
+                                                    key={scriptureKey}
+                                                    onClick={() => toggleReadStatus(bookName, chapterName, verseName)}
+                                                    className={`
+                                                        p-4 rounded-lg cursor-pointer transition-all duration-200 ease-in-out
+                                                        flex items-start
+                                                        ${isRead
+                                                            ? 'bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200 shadow-md border border-green-200 dark:border-green-700'
+                                                            : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 shadow-sm hover:shadow-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                        }
+                                                    `}
+                                                >
+                                                    <span className={`
+                                                        font-bold mr-3 min-w-[80px] text-right
+                                                        ${isRead ? 'text-green-600 dark:text-green-400' : 'text-indigo-600 dark:text-blue-400'}
+                                                    `}>
+                                                        {verseName}:
+                                                    </span>
+                                                    <p className="flex-1 text-base">{quote}</p>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            ))}
+                        </div>
+                    ))}
+                </div>
+
+                {showLoginPrompt && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 md:p-8 max-w-sm w-full text-center relative">
+                            <h2 className="text-2xl font-bold mb-4 text-indigo-700 dark:text-blue-400">Sign In</h2>
+                            <p className="text-gray-700 dark:text-gray-300 mb-6">
+                                Choose a sign-in method to save your progress.
+                            </p>
+                            <div className="space-y-4">
+                                <button
+                                    onClick={handleGoogleSignIn}
+                                    className="w-full flex items-center justify-center px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 shadow-lg text-lg font-semibold"
+                                >
+                                    <svg className="w-6 h-6 mr-3" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M22.675 11.375c0-.792-.06-1.577-.18-2.352H12.5v4.51h6.15c-.274 1.488-1.07 2.766-2.217 3.633v2.793h3.585c2.098-1.936 3.308-4.814 3.308-8.084z" fill="#4285F4"/>
+                                        <path d="M12.5 22c3.048 0 5.613-1.006 7.48-2.72l-3.585-2.793c-.982.723-2.22 1.15-3.895 1.15-3.003 0-5.55-2.023-6.467-4.75H2.5v2.859C4.385 20.395 8.163 22 12.5 22z" fill="#34A853"/>
+                                        <path d="M6.033 13.91c-.244-.723-.385-1.498-.385-2.29s.141-1.567.385-2.29V6.472H2.5C.926 7.859 0 9.877 0 12s.926 4.141 2.5 5.528l3.533-2.618z" fill="#FBBC05"/>
+                                        <path d="M12.5 5.38C14.12 5.38 15.617 6.04 16.738 7.042L20.08 3.7C18.106 1.879 15.421.75 12.5.75c-4.337 0-8.115 1.605-10 4.972l3.533 2.618c.917-2.727 3.464-4.75 6.467-4.75z" fill="#EA4335"/>
+                                    </svg>
+                                    Sign In with Google
+                                </button>
+                                <button
+                                    onClick={handleFacebookSignIn}
+                                    className="w-full flex items-center justify-center px-4 py-3 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors duration-200 shadow-lg text-lg font-semibold"
+                                >
+                                    <svg className="w-6 h-6 mr-3" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M22.676 12.876c0-5.185-4.215-9.4-9.4-9.4s-9.4 4.215-9.4 9.4c0 4.606 3.308 8.441 7.643 9.176V14.71h-2.91v-2.007h2.91v-1.528c0-2.883 1.76-4.469 4.343-4.469 1.238 0 2.302.22 2.597.316v2.784h-1.666c-1.31 0-1.565.623-1.565 1.536v1.942h3.111l-.504 2.007h-2.607v6.865c4.335-.735 7.643-4.57 7.643-9.176z"/>
+                                    </svg>
+                                    Sign In with Facebook
+                                </button>
+                            </div>
+                            <button
+                                onClick={() => setShowLoginPrompt(false)}
+                                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                                aria-label="Close"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default App;
