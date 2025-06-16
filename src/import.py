@@ -8,7 +8,6 @@ from scripture_data import scripture_list # Import the scripture list from the n
 BASE_URL = "https://raw.githubusercontent.com/allancoding/scriptures/main/"
 
 # Map book names (or abbreviations) to their corresponding JSON filenames
-# Moved to global scope
 book_to_file_map = {
     'Luke': 'new-testament.json',
     'Matt.': 'new-testament.json',
@@ -46,6 +45,7 @@ book_to_file_map = {
     'Morm.': 'book-of-mormon.json', 'Ether': 'book-of-mormon.json', 'Moro.': 'book-of-mormon.json',
     'Alma': 'book-of-mormon.json', 'Hel.': 'book-of-mormon.json', '3 Ne.': 'book-of-mormon.json',
     '4 Ne.': 'book-of-mormon.json',
+    'Jacob': 'book-of-mormon.json', # Added mapping for Jacob
     # Pearl of Great Price books
     'Abr.': 'pearl-of-great-price.json', 'Moses': 'pearl-of-great-price.json',
     'JS—M': 'pearl-of-great-price.json', 'JS—H': 'pearl-of-great-price.json',
@@ -53,11 +53,9 @@ book_to_file_map = {
 }
 
 # Cache for loaded JSON data to avoid re-fetching large files
-# Moved to global scope
 loaded_scriptures_cache = {}
 
 # Define a comprehensive map for URL slugs to standardized book names
-# Moved to global scope
 url_slug_to_book_name_map = {
     'gen': 'Gen.', 'ex': 'Ex.', 'lev': 'Lev.', 'num': 'Num.', 'deut': 'Deut.', 'josh': 'Josh.',
     'judg': 'Judg.', 'ruth': 'Ruth', '1-sam': '1 Sam.', '2-sam': '2 Sam.', '1-kgs': '1 Kgs.',
@@ -68,7 +66,8 @@ url_slug_to_book_name_map = {
     'jonah': 'Jonah', 'micah': 'Micah', 'nahum': 'Nahum', 'hab': 'Hab.', 'zeph': 'Zeph.',
     'hag': 'Hag.', 'zech': 'Zech.', 'mal': 'Mal.',
 
-    'matt': 'Matt.', 'mark': 'Mark', 'luke': 'Luke', 'john': 'John', 'acts': 'Acts',
+    'matt': 'Matt.', 'mark': 'Mark', 'luke': 'Luke', 'Luke': 'Luke',
+    'john': 'John', 'acts': 'Acts',
     'rom': 'Rom.', '1-cor': '1 Cor.', '2-cor': '2 Cor.', 'gal': 'Gal.', 'eph': 'Eph.',
     'philip': 'Philip.', 'col': 'Col.', '1-thes': '1 Thes.', '2-thes': '2 Thes.',
     '1-tim': '1 Tim.', '2-tim': '2 Tim.', 'titus': 'Titus', 'philem': 'Philem.',
@@ -84,7 +83,6 @@ url_slug_to_book_name_map = {
 }
 
 # Define a comprehensive map for abbreviations to full names used in JSON
-# Moved to global scope
 abbreviation_to_full_name_map = {
     '1 Ne.': '1 Nephi', '2 Ne.': '2 Nephi', '3 Ne.': '3 Nephi', '4 Ne.': '4 Nephi',
     'Alma': 'Alma', 'Hel.': 'Helaman', 'Ether': 'Ether', 'Moro.': 'Moroni',
@@ -114,13 +112,15 @@ abbreviation_to_full_name_map = {
     'JS—M': 'Joseph Smith—Matthew',
     'JS—H': 'Joseph Smith—History',
     'A of F': 'Articles of Faith',
+    'Jacob': 'Jacob', # Added mapping for Jacob
 }
 
 def parse_scripture_reference(ref_html):
     """
     Parses an HTML <a> tag to extract the scripture reference string.
     It prioritizes extracting the book name from the URL for robustness,
-    then parses the text for chapter and verses.
+    then parses the text for chapter and verses, including multiple,
+    comma-separated ranges. It then constructs a consistent full_ref_string.
     """
     # Regex to extract href and visible text
     match_full = re.search(r'<a href="(.*?)"[^>]*>(.*?)</a>', ref_html)
@@ -132,44 +132,64 @@ def parse_scripture_reference(ref_html):
     visible_text = match_full.group(2).strip()
 
     # Extract book slug from URL (e.g., 'matt', '1-ne', 'dc')
-    # This regex looks for the segment after '/scriptures/{testament}/' and before '/{chapter}'
     url_book_slug_match = re.search(r'/scriptures/(?:nt|ot|bofm|dc-testament|pgp)/([^/]+)/\d+', url)
-    book = None
+    book_abbreviation = None # This will store the standardized abbreviation (e.g., 'Matt.', 'Luke')
     if url_book_slug_match:
         slug = url_book_slug_match.group(1)
-        book = url_slug_to_book_name_map.get(slug)
-        if not book:
+        book_abbreviation = url_slug_to_book_name_map.get(slug)
+        if not book_abbreviation:
             print(f"Warning: Unknown URL slug '{slug}' for book in URL: {url}")
     else:
         print(f"Warning: Could not extract book slug from URL: {url}")
 
+    # Ensure we have a book abbreviation for lookup. If not derived from URL, parsing will fail.
+    if not book_abbreviation:
+        print(f"Error: No book name determined from URL for: {ref_html}")
+        return None
 
-    # Parse chapter and verses from visible text, assuming format "Chapter:Verse" or "Book Chapter:Verse"
-    # This regex is flexible enough to handle cases where the book name is NOT in the visible text
-    match_ref_text = re.match(r'^(?:(.*?)\s+)?(\d+):(\d+)(?:[–—](\d+))?$', visible_text)
+    # Regex to extract chapter and the entire verse string (e.g., "1-11,27-28")
+    match_ref_text = re.match(r'^(?:.*?\s+)?(\d+):(.+)$', visible_text)
 
     if not match_ref_text:
         print(f"Warning: Could not parse chapter/verse from visible text: {visible_text}")
         return None
 
-    # If a book name was found in the visible text, and it's different from the URL-derived one,
-    # prefer the URL-derived one for lookup accuracy, but keep the visible text for the
-    # full_ref_string for display consistency.
-    chapter = int(match_ref_text.group(2))
-    verse_start = int(match_ref_text.group(3))
-    verse_end = int(match_ref_text.group(4)) if match_ref_text.group(4) else verse_start
+    chapter = int(match_ref_text.group(1))
+    verse_string_raw = match_ref_text.group(2)
 
-    # Ensure we have a book name for lookup
-    if not book:
-        print(f"Error: No book name determined for: {ref_html}")
+    # Parse individual verse ranges from the raw verse string
+    verse_ranges = []
+    individual_verse_parts = verse_string_raw.split(',')
+    formatted_verse_parts_for_output = [] # To build the consistent full_ref_string
+    for part in individual_verse_parts:
+        verse_range_match = re.match(r'(\d+)(?:[–—](\d+))?', part.strip())
+        if verse_range_match:
+            start_v = int(verse_range_match.group(1))
+            end_v = int(verse_range_match.group(2)) if verse_range_match.group(2) else start_v
+            verse_ranges.append({'start': start_v, 'end': end_v})
+
+            # Format for the consistent output reference string
+            if start_v == end_v:
+                formatted_verse_parts_for_output.append(str(start_v))
+            else:
+                formatted_verse_parts_for_output.append(f"{start_v}–{end_v}")
+        else:
+            print(f"Warning: Could not parse individual verse part: '{part}' in '{visible_text}'")
+            continue
+
+    if not verse_ranges:
+        print(f"Error: No valid verse ranges found for: {visible_text}")
         return None
 
+    # Construct the full_ref_string for consistent output (e.g., "Luke 5:1–11, 27–28")
+    # This combines the determined book, chapter, and formatted verse ranges.
+    constructed_full_ref_string = f"{book_abbreviation} {chapter}:{','.join(formatted_verse_parts_for_output)}"
+
     return {
-        'book': book, # This 'book' is the standardized abbreviation/name for lookup
+        'book': book_abbreviation, # This 'book' is the standardized abbreviation/name for lookup
         'chapter': chapter,
-        'verse_start': verse_start,
-        'verse_end': verse_end,
-        'full_ref_string': visible_text # This is the exact text from the <a> tag for display
+        'verse_ranges': verse_ranges, # List of {'start': int, 'end': int} dictionaries
+        'full_ref_string': constructed_full_ref_string # This is the newly constructed, consistent reference
     }
 
 def get_book_json_data(book_name):
@@ -218,6 +238,7 @@ def lookup_and_write_scriptures(scripture_list, output_filepath):
     for scripture_html in scripture_list:
         parsed_ref = parse_scripture_reference(scripture_html)
         if not parsed_ref:
+            # If parsing fails entirely, record the raw HTML and a generic error.
             output_data.append({
                 "reference": scripture_html,
                 "text": "Scripture not found/parsed."
@@ -226,59 +247,64 @@ def lookup_and_write_scriptures(scripture_list, output_filepath):
 
         book_data = get_book_json_data(parsed_ref['book'])
         if not book_data:
+            # If book data cannot be retrieved, record the parsed reference and a specific error.
             output_data.append({
                 "reference": parsed_ref['full_ref_string'],
                 "text": f"Data not available for book: {parsed_ref['book']}"
             })
             continue
 
-        found_text = []
+        found_text_parts = [] # Collect individual verse texts here
         # Convert the parsed book abbreviation/name to the full name expected in JSON
         target_book_name_in_json = abbreviation_to_full_name_map.get(parsed_ref['book'], parsed_ref['book'])
 
-        # Check if the JSON has a top-level 'books' array (for BoM, OT, NT)
+        # Logic for 'books' structure (e.g., BoM, OT, NT)
         if 'books' in book_data:
             found_book_in_json = False
             for book_obj in book_data['books']:
-                # Match the book name from parsed reference to the 'book' field in JSON
                 if book_obj.get('book') == target_book_name_in_json:
                     found_book_in_json = True
                     for chapter_obj in book_obj.get('chapters', []):
                         if chapter_obj.get('chapter') == parsed_ref['chapter']:
-                            for verse_obj in chapter_obj.get('verses', []):
-                                current_verse_num = verse_obj.get('verse')
-                                if current_verse_num is not None and \
-                                   parsed_ref['verse_start'] <= current_verse_num <= parsed_ref['verse_end']:
-                                    found_text.append(verse_obj.get('text', ''))
-                            break # Found the chapter, no need to check other chapters
+                            # Get all verses for the current chapter and store them by verse number for quick lookup
+                            verses_in_chapter = {v_obj.get('verse'): v_obj.get('text', '') for v_obj in chapter_obj.get('verses', [])}
+
+                            # Iterate through all specified verse ranges from parsed_ref
+                            for target_range in parsed_ref['verse_ranges']:
+                                for current_verse_num in range(target_range['start'], target_range['end'] + 1):
+                                    if current_verse_num in verses_in_chapter:
+                                        found_text_parts.append(verses_in_chapter[current_verse_num])
+                            break # Found the chapter, no need to check other chapters in this book
                     break # Found the book, no need to check other books
             if not found_book_in_json:
                 print(f"Warning: Book '{target_book_name_in_json}' not found in JSON data for {parsed_ref['book']}'s file.")
-        # Otherwise, assume the 'sections' structure (for D&C, PoGP)
+        # Logic for 'sections' structure (e.g., D&C, PoGP)
         elif 'sections' in book_data:
             for section in book_data.get('sections', []):
-                # For D&C and Pearl of Great Price, the section reference in the JSON
-                # uses the abbreviation from the input HTML.
-                section_ref_prefix = f"{parsed_ref['book']} {parsed_ref['chapter']}"
+                section_ref_prefix = f"{parsed_ref['book']} {parsed_ref['chapter']}" # Use parsed_ref['book'] (abbreviation)
                 if section.get('reference') == section_ref_prefix:
-                    for verse_obj in section.get('verses', []):
-                        current_verse_num = verse_obj.get('verse')
-                        if current_verse_num is not None and \
-                           parsed_ref['verse_start'] <= current_verse_num <= parsed_ref['verse_end']:
-                            found_text.append(verse_obj.get('text', ''))
+                    # Get all verses for the current section and store them by verse number for quick lookup
+                    verses_in_section = {v_obj.get('verse'): v_obj.get('text', '') for v_obj in section.get('verses', [])}
+
+                    # Iterate through all specified verse ranges from parsed_ref
+                    for target_range in parsed_ref['verse_ranges']:
+                        for current_verse_num in range(target_range['start'], target_range['end'] + 1):
+                            if current_verse_num in verses_in_section:
+                                found_text_parts.append(verses_in_section[current_verse_num])
                     break # Found the section, no need to check other sections
         else:
             print(f"Error: Unknown JSON structure for {parsed_ref['book']}'s file. Neither 'books' nor 'sections' found at top level.")
 
 
-        if found_text:
+        if found_text_parts:
+            # Join the collected verse texts, ensuring they are unique and in order
             output_data.append({
-                "reference": parsed_ref['full_ref_string'],
-                "text": " ".join(found_text).strip()
+                "reference": parsed_ref['full_ref_string'], # Now consistently formatted
+                "text": " ".join(found_text_parts).strip()
             })
         else:
             output_data.append({
-                "reference": parsed_ref['full_ref_string'],
+                "reference": parsed_ref['full_ref_string'], # Still use this for error cases
                 "text": "Scripture not found in JSON."
             })
 
