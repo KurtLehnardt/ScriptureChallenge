@@ -105,6 +105,7 @@ const App = () => {
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
     const [userId, setUserId] = useState(null);
+    const [isSociallyLoggedIn, setIsSociallyLoggedIn] = useState(false); // New state for social login status
     const [readScriptures, setReadScriptures] = useState({}); // { 'Book_ChapterKey_VerseKey': true, ... }
     const [loading, setLoading] = useState(true);
     const [showLoginPrompt, setShowLoginPrompt] = useState(false);
@@ -133,9 +134,13 @@ const App = () => {
                     setMessage(`Logged in as User ID: ${user.uid}`); // Display full UID
                     setShowLoginPrompt(false); // Close prompt on successful login
                     setGuestSession(false); // Reset guest session if user logs in
+                    // Check if the current user is logged in via a social provider
+                    const isSocial = user.providerData && user.providerData.length > 1 && user.providerData[1].providerId !== 'firebase';
+                    setIsSociallyLoggedIn(isSocial);
                 } else {
                     setUserId(null);
                     setMessage('Not logged in. Please sign in to save progress.');
+                    setIsSociallyLoggedIn(false); // User is not socially logged in
                     // Only attempt anonymous sign-in or show prompt if not in a guest session
                     if (!guestSession) {
                         const initialAuth = async () => {
@@ -377,14 +382,16 @@ const App = () => {
                         aria-label="Open menu"
                     >
                         <svg className="w-8 h-8 text-indigo-600 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7"></path>
+                            {/* Corrected SVG path for equal line lengths */}
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"></path>
                         </svg>
                     </button>
 
                     {/* Dropdown menu */}
                     {showMenu && (
                         <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-lg z-10 py-2">
-                            {userId ? (
+                            {/* Logic updated to check isSociallyLoggedIn */}
+                            {isSociallyLoggedIn ? (
                                 <button
                                     onClick={handleSignOut}
                                     className="block w-full text-left px-4 py-2 text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-600"
