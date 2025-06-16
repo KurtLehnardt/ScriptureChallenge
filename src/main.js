@@ -10,41 +10,125 @@ import {
     signInWithPopup,
     signOut
 } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// Mock Scripture Data
-// In a real application, this would likely come from an API or a larger data source.
-// This example focuses on the structure and interaction.
-const MOCK_SCRIPTURES = {
-    "Matthew": {
-        "Chapter 5": {
-            "Verse 1": "Blessed are the poor in spirit: for theirs is the kingdom of heaven.",
-            "Verse 2": "Blessed are they that mourn: for they shall be comforted."
-        },
-        "Chapter 6": {
-            "Verse 1": "Take heed that ye do not your alms before men, to be seen of them: otherwise ye have no reward of your Father which is in heaven.",
-            "Verse 2": "Therefore when thou doest thine alms, do not sound a trumpet before thee, as the hypocrites do in the synagogues and in the streets, that they may have glory of men. Verily I say unto you, They have their reward."
-        }
+// Directly embedding the scripture data from your provided JSON structure
+const scriptureDataFromJSON = [
+    {
+        "reference": "Luke 1:26–38",
+        "text": "And in the sixth month the angel Gabriel was sent from God unto a city of Galilee, named Nazareth, To a virgin espoused to a man whose name was Joseph, of the house of David; and the virgin's name was Mary. And the angel came in unto her, and said, Hail, thou that art highly favoured, the Lord is with thee: blessed art thou among women. And when she saw him, she was troubled at his saying, and cast in her mind what manner of salutation this should be. And the angel said unto her, Fear not, Mary: for thou hast found favour with God. And, behold, thou shalt conceive in thy womb, and bring forth a son, and shalt call his name JESUS. He shall be great, and shall be called the Son of the Highest: and the Lord God shall give unto him the throne of his father David: And he shall reign over the house of Jacob for ever; and of his kingdom shall be no end. Then said Mary unto the angel, How shall this be, seeing I know not a man? And the angel answered and said unto her, The Holy Ghost shall come upon thee, and the power of the Highest shall overshadow thee: therefore also that holy thing which shall be born of thee shall be called the Son of God. And, behold, thy cousin Elisabeth, she hath also conceived a son in her old age: and this is the sixth month with her, who was called barren. For with God nothing shall be impossible. And Mary said, Behold the handmaid of the Lord; be it unto me according to thy word. And the angel departed from her."
     },
-    "Mark": {
-        "Chapter 1": {
-            "Verse 1": "The beginning of the gospel of Jesus Christ, the Son of God;",
-            "Verse 2": "As it is written in the prophets, Behold, I send my messenger before thy face, which shall prepare thy way before thee."
-        }
+    {
+        "reference": "Matt. 1:18–25",
+        "text": "Now the birth of Jesus Christ was on this wise: When as his mother Mary was espoused to Joseph, before they came together, she was found with child of the Holy Ghost. Then Joseph her husband, being a just man, and not willing to make her a publick example, was minded to put her away privily. But while he thought on these things, behold, the angel of the Lord appeared unto him in a dream, saying, Joseph, thou son of David, fear not to take unto thee Mary thy wife: for that which is conceived in her is of the Holy Ghost. And she shall bring forth a son, and thou shalt call his name JESUS: for he shall save his people from their sins. Now all this was done, that it might be fulfilled which was spoken of the Lord by the prophet, saying, Behold, a virgin shall be with child, and shall bring forth a son, and they shall call his name Emmanuel, which being interpreted is, God with us. Then Joseph being raised from sleep did as the angel of the Lord had bidden him, and took unto him his wife: And knew her not till she had brought forth her firstborn son: and he called his name JESUS."
     },
-    "Luke": {
-        "Chapter 10": {
-            "Verse 1": "After these things the Lord appointed other seventy also, and sent them two and two before his face into every city and place, whither he himself would come.",
-            "Verse 2": "Therefore said he unto them, the harvest truly is great, but the labourers are few: pray ye therefore the Lord of the harvest, that he would send forth labourers into his harvest."
-        }
+    {
+        "reference": "Luke 2:1–7",
+        "text": "And it came to pass in those days, that there went out a decree from Cæsar Augustus, that all the world should be taxed. (And this taxing was first made when Cyrenius was governor of Syria.) And all went to be taxed, every one into his own city. And Joseph also went up from Galilee, out of the city of Nazareth, into Judæa, unto the city of David, which is called Bethlehem; (because he was of the house and lineage of David:) To be taxed with Mary his espoused wife, being great with child. And so it was, that, while were there, the days were accomplished that she should be delivered. And she brought forth her firstborn son, and wrapped him in swaddling clothes, and laid him in a manger; because there was no room for them in the inn."
+    },
+    {
+        "reference": "Luke 2:21",
+        "text": "And when eight days were accomplished for the circumcising of the child, his name was called JESUS, which was so named of the angel before he was conceived in the womb."
+    },
+    {
+        "reference": "1 Ne. 10:11",
+        "text": "And after Christ shall have risen from the dead he shall show himself unto you, my children, and my beloved brethren; and the words which I speak are not of myself but of my Father; for he hath sent me forth that I should speak these things unto you."
+    },
+    {
+        "reference": "2 Ne. 25:13",
+        "text": "And according to the words of the prophets, and also the word of the angel, his name shall be Jesus Christ, the Son of God."
+    },
+    {
+        "reference": "Mosiah 14:5",
+        "text": "But he was wounded for our transgressions, he was bruised for our iniquities: the chastisement of our peace was upon him; and with his stripes we are healed."
+    },
+    {
+        "reference": "D&C 6:37",
+        "text": "Lift up your hearts and rejoice, for the hour of your deliverance is nigh."
+    },
+    {
+        "reference": "D&C 20:23",
+        "text": "And we know that all men must repent and believe on the name of Jesus Christ, and worship the Father in his name, and endure in faith on his name to the end, or they cannot be saved in the kingdom of God."
     }
+];
+
+// Define an object to build the structured data for display
+const SCRIPTURE_DATA = {}; // This will be populated on component load
+
+// Helper function to parse scripture reference text (e.g., "Luke 1:26–38")
+const parseScriptureReference = (text) => {
+    // Regex to handle various formats like "Luke 1:26–38", "1 Pet. 2:5", "3 Ne. 9:20", "D&C 59:8"
+    // It captures:
+    // 1. Book Name (e.g., "Luke", "1 Pet.", "3 Ne.", "D&C") - non-greedy match to handle spaces
+    // 2. Chapter Number (e.g., "1", "2", "9", "59")
+    // 3. Optional Verse Range (e.g., ":26–38", ":5", ":20", ":8")
+    const match = text.match(/^([\w\s&.]+?)\s*(\d+)(:\d+(?:–\d+)?)?$/);
+
+    if (!match) {
+        console.warn("Could not parse scripture reference:", text);
+        return null;
+    }
+
+    const book = match[1].trim();
+    const chapter = parseInt(match[2], 10);
+    const verse = match[3] ? match[3].substring(1) : ''; // Remove leading ':'
+
+    return { book, chapter, verse, display: text };
 };
+
+// Populate SCRIPTURE_DATA from the embedded JSON data
+// This happens once when the module loads
+if (Array.isArray(scriptureDataFromJSON)) {
+    scriptureDataFromJSON.forEach(item => {
+        const referenceText = item.reference;
+        const scriptureText = item.text; // The full text is directly available
+
+        // Construct a generic URL to the Church's scripture study page based on the reference.
+        // This URL structure is derived from how churchofjesuschrist.org formats its URLs.
+        const urlBook = referenceText.split(' ')[0].toLowerCase().replace('.', ''); // e.g., 'luke', 'matt', '1ne', 'dc'
+        const urlChapterVerse = referenceText.split(' ')[1].replace(/–/g, '-'); // e.g., '1.26-38', '2.21'
+        const url = `https://www.churchofjesuschrist.org/study/scriptures/nt/${urlBook}/${urlChapterVerse}?lang=eng`;
+        // Note: For books like "3 Ne." or "D&C", you might need more specific logic to form accurate URLs
+        // if the basic replacement doesn't match the church website's exact structure for all cases.
+        // For example, '3-ne' might be 'bofm/3-ne' and 'dc' might be 'dc-testament/dc'.
+        // This current generic approach is a best effort.
+
+        const parsed = parseScriptureReference(referenceText);
+        if (parsed) {
+            const { book, chapter, verse, display } = parsed;
+
+            // Ensure book entry exists
+            if (!SCRIPTURE_DATA[book]) {
+                SCRIPTURE_DATA[book] = {};
+            }
+
+            // Create chapter key (e.g., "Chapter 1")
+            const chapterKey = `Chapter ${chapter}`;
+            if (!SCRIPTURE_DATA[book][chapterKey]) {
+                SCRIPTURE_DATA[book][chapterKey] = {};
+            }
+
+            // Create verse key (e.g., "1:26–38" or "21")
+            const verseKey = `${chapter}${verse ? ':' + verse : ''}`;
+
+            // Store the reference text, URL, and the actual scripture text
+            SCRIPTURE_DATA[book][chapterKey][verseKey] = {
+                linkText: display, // Original reference text e.g., "Luke 1:26–38"
+                url: url, // Constructed URL to the Church website
+                scriptureText: scriptureText // The actual verse content from your JSON
+            };
+        }
+    });
+} else {
+    console.warn("scriptureDataFromJSON is not an array, or is empty.");
+}
+
 
 const App = () => {
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
     const [userId, setUserId] = useState(null);
-    const [readScriptures, setReadScriptures] = useState({}); // { 'Matthew_5_Verse 1': true, ... }
+    const [readScriptures, setReadScriptures] = useState({}); // { 'Book_ChapterKey_VerseKey': true, ... }
     const [loading, setLoading] = useState(true);
     const [showLoginPrompt, setShowLoginPrompt] = useState(false);
     const [message, setMessage] = useState('');
@@ -86,7 +170,7 @@ const App = () => {
                             console.error("Firebase Auth Error (initial):", error);
                             setMessage(`Authentication error: ${error.message}`);
                         } finally {
-                            setLoading(false);
+                            setLoading(false); // Authentication attempt finished
                         }
                     };
                     initialAuth();
@@ -127,14 +211,15 @@ const App = () => {
     }, [db, userId]); // Re-run when db or userId changes
 
     // Function to mark a scripture as read/unread
-    const toggleReadStatus = useCallback(async (book, chapter, verse) => {
+    const toggleReadStatus = useCallback(async (book, chapterKey, verseKey) => {
         if (!db || !userId) {
             setMessage("Please sign in to save your progress.");
             setShowLoginPrompt(true); // Show login prompt if not authenticated
             return;
         }
 
-        const scriptureKey = `${book}_${chapter}_${verse}`;
+        // The scriptureKey must match how it's stored in Firestore
+        const scriptureKey = `${book}_${chapterKey}_${verseKey}`;
         const newReadStatus = { ...readScriptures };
 
         if (newReadStatus[scriptureKey]) {
@@ -148,22 +233,22 @@ const App = () => {
         try {
             // Use setDoc with merge:true to update or create the document without overwriting other fields
             await setDoc(userProgressDocRef, { progress: newReadStatus }, { merge: true });
-            // setMessage(`Progress saved for ${book} ${chapter} ${verse}.`); // Removed for less clutter
         } catch (e) {
             console.error("Error writing document: ", e);
             setMessage(`Error saving progress: ${e.message}`);
         }
     }, [db, userId, readScriptures]); // Dependencies for useCallback
 
-    // Calculate total scriptures and read scriptures
-    const totalScriptures = Object.values(MOCK_SCRIPTURES).reduce((bookAcc, book) => {
+    // Calculate total scriptures from the parsed SCRIPTURE_DATA
+    const totalScriptures = Object.values(SCRIPTURE_DATA).reduce((bookAcc, book) => {
         return bookAcc + Object.values(book).reduce((chapterAcc, chapter) => {
             return chapterAcc + Object.keys(chapter).length;
         }, 0);
     }, 0);
 
     const numReadScriptures = Object.keys(readScriptures).length;
-    const progressPercentage = totalScriptures > 0 ? ((numReadScriptures / totalScriptures) * 100).toFixed(2) : 0;
+    // Changed to toFixed(0) for no decimal places
+    const progressPercentage = totalScriptures > 0 ? ((numReadScriptures / totalScriptures) * 100).toFixed(0) : 0;
 
     // Handlers for social logins
     const handleGoogleSignIn = async () => {
@@ -204,11 +289,11 @@ const App = () => {
         }
     };
 
-    // Show loading state
+    // Show main loading state if Firebase/Auth is still initializing
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
-                <div className="text-2xl font-semibold">Loading Application...</div>
+                <div className="text-2xl font-semibold">Initializing Application...</div>
             </div>
         );
     }
@@ -255,7 +340,7 @@ const App = () => {
 
             <div className="max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 md:p-8">
                 <h1 className="text-4xl font-bold text-center mb-6 text-indigo-700 dark:text-blue-400">
-                    Jesus' Sayings Reader
+                    Scripture Reader
                 </h1>
 
                 <div className="flex justify-between items-center mb-6 p-4 bg-indigo-50 dark:bg-gray-700 rounded-lg shadow-inner">
@@ -301,48 +386,67 @@ const App = () => {
                 )}
 
                 <div className="scroll-container space-y-8 p-4 bg-gray-50 dark:bg-gray-750 rounded-xl shadow-inner">
-                    {Object.entries(MOCK_SCRIPTURES).map(([bookName, bookData]) => (
-                        <div key={bookName} className="border-b border-indigo-200 dark:border-gray-600 pb-4 last:border-b-0">
-                            <h2 className="text-3xl font-semibold text-indigo-600 dark:text-blue-300 mb-4 px-2 py-1 rounded-md bg-indigo-100 dark:bg-gray-700">
-                                {bookName}
-                            </h2>
-                            {Object.entries(bookData).map(([chapterName, chapterData]) => (
-                                <div key={`${bookName}-${chapterName}`} className="mb-6 ml-4">
-                                    <h3 className="text-xl font-medium text-indigo-500 dark:text-blue-200 mb-3">
-                                        {chapterName}
-                                    </h3>
-                                    <ul className="space-y-3">
-                                        {Object.entries(chapterData).map(([verseName, quote]) => {
-                                            const scriptureKey = `${bookName}_${chapterName}_${verseName}`;
-                                            const isRead = readScriptures[scriptureKey];
-                                            return (
-                                                <li
-                                                    key={scriptureKey}
-                                                    onClick={() => toggleReadStatus(bookName, chapterName, verseName)}
-                                                    className={`
-                                                        p-4 rounded-lg cursor-pointer transition-all duration-200 ease-in-out
-                                                        flex items-start
-                                                        ${isRead
-                                                            ? 'bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200 shadow-md border border-green-200 dark:border-green-700'
-                                                            : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 shadow-sm hover:shadow-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                                        }
-                                                    `}
-                                                >
-                                                    <span className={`
-                                                        font-bold mr-3 min-w-[80px] text-right
-                                                        ${isRead ? 'text-green-600 dark:text-green-400' : 'text-indigo-600 dark:text-blue-400'}
-                                                    `}>
-                                                        {verseName}:
-                                                    </span>
-                                                    <p className="flex-1 text-base">{quote}</p>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
-                            ))}
-                        </div>
-                    ))}
+                    {Object.keys(SCRIPTURE_DATA).length === 0 ? (
+                        <p className="text-center text-gray-600 dark:text-gray-400">
+                            No scriptures loaded or available.
+                        </p>
+                    ) : (
+                        Object.entries(SCRIPTURE_DATA).map(([bookName, bookData]) => (
+                            <div key={bookName} className="border-b border-indigo-200 dark:border-gray-600 pb-4 last:border-b-0">
+                                <h2 className="text-3xl font-semibold text-indigo-600 dark:text-blue-300 mb-4 px-2 py-1 rounded-md bg-indigo-100 dark:bg-gray-700">
+                                    {bookName}
+                                </h2>
+                                {Object.entries(bookData).map(([chapterName, chapterData]) => (
+                                    <div key={`${bookName}-${chapterName}`} className="mb-6 ml-4">
+                                        <h3 className="text-xl font-medium text-indigo-500 dark:text-blue-200 mb-3">
+                                            {chapterName}
+                                        </h3>
+                                        <ul className="space-y-3">
+                                            {Object.entries(chapterData).map(([verseKey, item]) => {
+                                                const scriptureReadStatusKey = `${bookName}_${chapterName}_${verseKey}`;
+                                                const isRead = readScriptures[scriptureReadStatusKey];
+                                                return (
+                                                    <li
+                                                        key={scriptureReadStatusKey}
+                                                        onClick={() => toggleReadStatus(bookName, chapterName, verseKey)}
+                                                        className={`
+                                                            p-4 rounded-lg cursor-pointer transition-all duration-200 ease-in-out
+                                                            flex items-start
+                                                            ${isRead
+                                                                ? 'bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200 shadow-md border border-green-200 dark:border-green-700'
+                                                                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 shadow-sm hover:shadow-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                            }
+                                                        `}
+                                                    >
+                                                        <span className={`
+                                                            font-bold mr-3 min-w-[80px] text-right
+                                                            ${isRead ? 'text-green-600 dark:text-green-400' : 'text-indigo-600 dark:text-blue-400'}
+                                                        `}>
+                                                            {/* The clickable link is now the scripture reference */}
+                                                            <a
+                                                                href={item.url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-blue-500 hover:underline dark:text-blue-300"
+                                                                onClick={(e) => e.stopPropagation()} // Prevent marking as read when clicking link
+                                                            >
+                                                                {item.linkText}
+                                                            </a>
+                                                            :
+                                                        </span>
+                                                        <p className="flex-1 text-base">
+                                                            {/* The scripture text is now plain text */}
+                                                            {item.scriptureText}
+                                                        </p>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    </div>
+                                ))}
+                            </div>
+                        ))
+                    )}
                 </div>
 
                 {showLoginPrompt && (
