@@ -12,7 +12,6 @@ import {
 } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// Directly embedding the scripture data from your provided JSON structure
 import scriptureJSON from './scripture_texts.json';
 
 // Define an object to build the structured data for display
@@ -48,13 +47,28 @@ if (Array.isArray(scriptureJSON)) {
 
         // Construct a generic URL to the Church's scripture study page based on the reference.
         // This URL structure is derived from how churchofjesuschrist.org formats its URLs.
-        const urlBook = referenceText.split(' ')[0].toLowerCase().replace('.', ''); // e.g., 'luke', 'matt', '1ne', 'dc'
-        const urlChapterVerse = referenceText.split(' ')[1].replace(/–/g, '-'); // e.g., '1.26-38', '2.21'
-        const url = `https://www.churchofjesuschrist.org/study/scriptures/nt/${urlBook}/${urlChapterVerse}?lang=eng`;
-        // Note: For books like "3 Ne." or "D&C", you might need more specific logic to form accurate URLs
-        // if the basic replacement doesn't match the church website's exact structure for all cases.
-        // For example, '3-ne' might be 'bofm/3-ne' and 'dc' might be 'dc-testament/dc'.
-        // This current generic approach is a best effort.
+        let url = '#'; // Default placeholder URL
+
+        // Basic parsing for URL construction (can be expanded for more accuracy)
+        const parts = referenceText.split(/[\s:]+/); // Splits by space and colon
+        if (parts.length >= 2) {
+            let urlBook = parts[0].toLowerCase().replace('.', ''); // e.g., 'luke', 'matt', '1ne', 'dc'
+            let urlChapter = parts[1];
+            let urlVerse = parts.length > 2 ? parts[2].replace(/–/g, '-') : '';
+
+            let volumePath = 'nt'; // Default to New Testament
+            if (['1ne', '2ne', 'mosiah', 'alma', 'hel', '3ne', '4ne', 'morm', 'ether', 'moro'].includes(urlBook)) {
+                volumePath = 'bofm';
+            } else if (urlBook === 'd&c') {
+                volumePath = 'dc-testament';
+            } else if (urlBook === 'abr') {
+                volumePath = 'pgp'; // Pearl of Great Price
+            } else if (urlBook === 'moses' || urlBook === 'gen') {
+                 volumePath = 'ot'; // Old Testament
+            }
+
+            url = `https://www.churchofjesuschrist.org/study/scriptures/${volumePath}/${urlBook}/${urlChapter}${urlVerse ? '.' + urlVerse : ''}?lang=eng`;
+        }
 
         const parsed = parseScriptureReference(referenceText);
         if (parsed) {
@@ -95,6 +109,9 @@ const App = () => {
     const [loading, setLoading] = useState(true);
     const [showLoginPrompt, setShowLoginPrompt] = useState(false);
     const [message, setMessage] = useState('');
+    const [showMenu, setShowMenu] = useState(false); // State for hamburger menu visibility
+    const [guestSession, setGuestSession] = useState(false); // State to track guest session preference
+
 
     // Firebase initialization and authentication
     useEffect(() => {
@@ -115,28 +132,33 @@ const App = () => {
                     setUserId(user.uid);
                     setMessage(`Logged in as User ID: ${user.uid}`); // Display full UID
                     setShowLoginPrompt(false); // Close prompt on successful login
+                    setGuestSession(false); // Reset guest session if user logs in
                 } else {
                     setUserId(null);
                     setMessage('Not logged in. Please sign in to save progress.');
-                    // If not logged in, attempt anonymous sign-in or show prompt
-                    const initialAuth = async () => {
-                        try {
-                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                                await signInWithCustomToken(firebaseAuth, __initial_auth_token);
-                            } else {
-                                // Only sign in anonymously if no other auth method is active
-                                if (!firebaseAuth.currentUser) {
-                                    await signInAnonymously(firebaseAuth);
+                    // Only attempt anonymous sign-in or show prompt if not in a guest session
+                    if (!guestSession) {
+                        const initialAuth = async () => {
+                            try {
+                                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                    await signInWithCustomToken(firebaseAuth, __initial_auth_token);
+                                } else {
+                                    // Only sign in anonymously if no other auth method is active
+                                    if (!firebaseAuth.currentUser) {
+                                        await signInAnonymously(firebaseAuth);
+                                    }
                                 }
+                            } catch (error) {
+                                console.error("Firebase Auth Error (initial):", error);
+                                setMessage(`Authentication error: ${error.message}`);
+                            } finally {
+                                setLoading(false); // Authentication attempt finished
                             }
-                        } catch (error) {
-                            console.error("Firebase Auth Error (initial):", error);
-                            setMessage(`Authentication error: ${error.message}`);
-                        } finally {
-                            setLoading(false); // Authentication attempt finished
-                        }
-                    };
-                    initialAuth();
+                        };
+                        initialAuth();
+                    } else {
+                        setLoading(false); // Stop loading if already in guest session
+                    }
                 }
                 // Ensure loading is false after initial auth state check
                 if (firebaseAuth.currentUser === null && !loading) {
@@ -150,7 +172,7 @@ const App = () => {
             setMessage(`Initialization error: ${error.message}`);
             setLoading(false);
         }
-    }, []); // Empty dependency array means this runs once on mount
+    }, [guestSession]); // Add guestSession to dependency array
 
     // Fetch read scriptures from Firestore
     useEffect(() => {
@@ -176,12 +198,27 @@ const App = () => {
     // Function to mark a scripture as read/unread
     const toggleReadStatus = useCallback(async (book, chapterKey, verseKey) => {
         if (!db || !userId) {
-            setMessage("Please sign in to save your progress.");
-            setShowLoginPrompt(true); // Show login prompt if not authenticated
+            if (!guestSession) { // Only prompt if not already in a guest session
+                setMessage("Sign in to save your progress.");
+                setShowLoginPrompt(true); // Show login prompt if not authenticated
+            }
+            // For guest session or if user cancels login, allow local state change
+            // This is a simplified approach; real guest sessions might use local storage.
+            // For now, if not logged in, progress won't persist beyond session.
+            const scriptureKey = `${book}_${chapterKey}_${verseKey}`;
+            setReadScriptures(prev => {
+                const newState = { ...prev };
+                if (newState[scriptureKey]) {
+                    delete newState[scriptureKey];
+                } else {
+                    newState[scriptureKey] = true;
+                }
+                return newState;
+            });
             return;
         }
 
-        // The scriptureKey must match how it's stored in Firestore
+        // Logic to save to Firestore if user is authenticated
         const scriptureKey = `${book}_${chapterKey}_${verseKey}`;
         const newReadStatus = { ...readScriptures };
 
@@ -200,7 +237,7 @@ const App = () => {
             console.error("Error writing document: ", e);
             setMessage(`Error saving progress: ${e.message}`);
         }
-    }, [db, userId, readScriptures]); // Dependencies for useCallback
+    }, [db, userId, readScriptures, guestSession]); // Dependencies for useCallback
 
     // Calculate total scriptures from the parsed SCRIPTURE_DATA
     const totalScriptures = Object.values(SCRIPTURE_DATA).reduce((bookAcc, book) => {
@@ -221,6 +258,7 @@ const App = () => {
             await signInWithPopup(auth, provider);
             setShowLoginPrompt(false); // Close modal on success
             setMessage("Signed in with Google successfully!");
+            setShowMenu(false); // Close menu after sign in
         } catch (error) {
             console.error("Google Sign-in Error:", error);
             setMessage(`Google Sign-in failed: ${error.message}`);
@@ -234,6 +272,7 @@ const App = () => {
             await signInWithPopup(auth, provider);
             setShowLoginPrompt(false); // Close modal on success
             setMessage("Signed in with Facebook successfully!");
+            setShowMenu(false); // Close menu after sign in
         } catch (error) {
             console.error("Facebook Sign-in Error:", error);
             setMessage(`Facebook Sign-in failed: ${error.message}`);
@@ -246,10 +285,18 @@ const App = () => {
             await signOut(auth);
             setReadScriptures({}); // Clear local progress on sign out
             setMessage("Signed out successfully.");
+            setGuestSession(false); // Reset guest session state on sign out
+            setShowMenu(false); // Close menu after sign out
         } catch (error) {
             console.error("Sign-out Error:", error);
             setMessage(`Sign-out failed: ${error.message}`);
         }
+    };
+
+    const handleContinueLoggedOut = () => {
+        setGuestSession(true); // Mark session as guest
+        setShowLoginPrompt(false); // Close the prompt
+        setMessage("Continuing as guest. Progress will not be saved.");
     };
 
     // Show main loading state if Firebase/Auth is still initializing
@@ -306,7 +353,7 @@ const App = () => {
                     Scripture Reader
                 </h1>
 
-                <div className="flex justify-between items-center mb-6 p-4 bg-indigo-50 dark:bg-gray-700 rounded-lg shadow-inner">
+                <div className="relative flex justify-between items-center mb-6 p-4 bg-indigo-50 dark:bg-gray-700 rounded-lg shadow-inner">
                     <div className="text-lg font-semibold flex items-center">
                         <span className="mr-2 text-indigo-600 dark:text-blue-300">User ID:</span>
                         {userId ? (
@@ -323,23 +370,40 @@ const App = () => {
                             {numReadScriptures} / {totalScriptures} ({progressPercentage}%)
                         </span>
                     </div>
-                    <div className="flex space-x-2">
-                        {!userId ? (
-                            <button
-                                onClick={() => setShowLoginPrompt(true)}
-                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200 shadow-md"
-                            >
-                                Sign In
-                            </button>
-                        ) : (
-                            <button
-                                onClick={handleSignOut}
-                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 shadow-md"
-                            >
-                                Sign Out
-                            </button>
-                        )}
-                    </div>
+                    {/* Hamburger menu button */}
+                    <button
+                        onClick={() => setShowMenu(!showMenu)}
+                        className="p-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-gray-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        aria-label="Open menu"
+                    >
+                        <svg className="w-8 h-8 text-indigo-600 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7"></path>
+                        </svg>
+                    </button>
+
+                    {/* Dropdown menu */}
+                    {showMenu && (
+                        <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-lg z-10 py-2">
+                            {userId ? (
+                                <button
+                                    onClick={handleSignOut}
+                                    className="block w-full text-left px-4 py-2 text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-600"
+                                >
+                                    Sign Out
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => {
+                                        setShowLoginPrompt(true);
+                                        setShowMenu(false); // Close hamburger menu when opening login prompt
+                                    }}
+                                    className="block w-full text-left px-4 py-2 text-indigo-600 dark:text-blue-300 hover:bg-gray-100 dark:hover:bg-gray-600"
+                                >
+                                    Sign In
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {message && (
@@ -440,6 +504,12 @@ const App = () => {
                                         <path d="M22.676 12.876c0-5.185-4.215-9.4-9.4-9.4s-9.4 4.215-9.4 9.4c0 4.606 3.308 8.441 7.643 9.176V14.71h-2.91v-2.007h2.91v-1.528c0-2.883 1.76-4.469 4.343-4.469 1.238 0 2.302.22 2.597.316v2.784h-1.666c-1.31 0-1.565.623-1.565 1.536v1.942h3.111l-.504 2.007h-2.607v6.865c4.335-.735 7.643-4.57 7.643-9.176z"/>
                                     </svg>
                                     Sign In with Facebook
+                                </button>
+                                <button
+                                    onClick={handleContinueLoggedOut}
+                                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-200 shadow-sm text-lg font-semibold"
+                                >
+                                    Continue to use logged out
                                 </button>
                             </div>
                             <button
