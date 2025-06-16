@@ -13,44 +13,7 @@ import {
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
 // Directly embedding the scripture data from your provided JSON structure
-const scriptureDataFromJSON = [
-    {
-        "reference": "Luke 1:26–38",
-        "text": "And in the sixth month the angel Gabriel was sent from God unto a city of Galilee, named Nazareth, To a virgin espoused to a man whose name was Joseph, of the house of David; and the virgin's name was Mary. And the angel came in unto her, and said, Hail, thou that art highly favoured, the Lord is with thee: blessed art thou among women. And when she saw him, she was troubled at his saying, and cast in her mind what manner of salutation this should be. And the angel said unto her, Fear not, Mary: for thou hast found favour with God. And, behold, thou shalt conceive in thy womb, and bring forth a son, and shalt call his name JESUS. He shall be great, and shall be called the Son of the Highest: and the Lord God shall give unto him the throne of his father David: And he shall reign over the house of Jacob for ever; and of his kingdom shall be no end. Then said Mary unto the angel, How shall this be, seeing I know not a man? And the angel answered and said unto her, The Holy Ghost shall come upon thee, and the power of the Highest shall overshadow thee: therefore also that holy thing which shall be born of thee shall be called the Son of God. And, behold, thy cousin Elisabeth, she hath also conceived a son in her old age: and this is the sixth month with her, who was called barren. For with God nothing shall be impossible. And Mary said, Behold the handmaid of the Lord; be it unto me according to thy word. And the angel departed from her."
-    },
-    {
-        "reference": "Matt. 1:18–25",
-        "text": "Now the birth of Jesus Christ was on this wise: When as his mother Mary was espoused to Joseph, before they came together, she was found with child of the Holy Ghost. Then Joseph her husband, being a just man, and not willing to make her a publick example, was minded to put her away privily. But while he thought on these things, behold, the angel of the Lord appeared unto him in a dream, saying, Joseph, thou son of David, fear not to take unto thee Mary thy wife: for that which is conceived in her is of the Holy Ghost. And she shall bring forth a son, and thou shalt call his name JESUS: for he shall save his people from their sins. Now all this was done, that it might be fulfilled which was spoken of the Lord by the prophet, saying, Behold, a virgin shall be with child, and shall bring forth a son, and they shall call his name Emmanuel, which being interpreted is, God with us. Then Joseph being raised from sleep did as the angel of the Lord had bidden him, and took unto him his wife: And knew her not till she had brought forth her firstborn son: and he called his name JESUS."
-    },
-    {
-        "reference": "Luke 2:1–7",
-        "text": "And it came to pass in those days, that there went out a decree from Cæsar Augustus, that all the world should be taxed. (And this taxing was first made when Cyrenius was governor of Syria.) And all went to be taxed, every one into his own city. And Joseph also went up from Galilee, out of the city of Nazareth, into Judæa, unto the city of David, which is called Bethlehem; (because he was of the house and lineage of David:) To be taxed with Mary his espoused wife, being great with child. And so it was, that, while were there, the days were accomplished that she should be delivered. And she brought forth her firstborn son, and wrapped him in swaddling clothes, and laid him in a manger; because there was no room for them in the inn."
-    },
-    {
-        "reference": "Luke 2:21",
-        "text": "And when eight days were accomplished for the circumcising of the child, his name was called JESUS, which was so named of the angel before he was conceived in the womb."
-    },
-    {
-        "reference": "1 Ne. 10:11",
-        "text": "And after Christ shall have risen from the dead he shall show himself unto you, my children, and my beloved brethren; and the words which I speak are not of myself but of my Father; for he hath sent me forth that I should speak these things unto you."
-    },
-    {
-        "reference": "2 Ne. 25:13",
-        "text": "And according to the words of the prophets, and also the word of the angel, his name shall be Jesus Christ, the Son of God."
-    },
-    {
-        "reference": "Mosiah 14:5",
-        "text": "But he was wounded for our transgressions, he was bruised for our iniquities: the chastisement of our peace was upon him; and with his stripes we are healed."
-    },
-    {
-        "reference": "D&C 6:37",
-        "text": "Lift up your hearts and rejoice, for the hour of your deliverance is nigh."
-    },
-    {
-        "reference": "D&C 20:23",
-        "text": "And we know that all men must repent and believe on the name of Jesus Christ, and worship the Father in his name, and endure in faith on his name to the end, or they cannot be saved in the kingdom of God."
-    }
-];
+import scriptureJSON from './scripture_texts.json';
 
 // Define an object to build the structured data for display
 const SCRIPTURE_DATA = {}; // This will be populated on component load
@@ -78,8 +41,8 @@ const parseScriptureReference = (text) => {
 
 // Populate SCRIPTURE_DATA from the embedded JSON data
 // This happens once when the module loads
-if (Array.isArray(scriptureDataFromJSON)) {
-    scriptureDataFromJSON.forEach(item => {
+if (Array.isArray(scriptureJSON)) {
+    scriptureJSON.forEach(item => {
         const referenceText = item.reference;
         const scriptureText = item.text; // The full text is directly available
 
@@ -120,7 +83,7 @@ if (Array.isArray(scriptureDataFromJSON)) {
         }
     });
 } else {
-    console.warn("scriptureDataFromJSON is not an array, or is empty.");
+    console.warn("scriptureJSON is not an array, or is empty.");
 }
 
 
